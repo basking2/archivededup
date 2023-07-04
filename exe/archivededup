@@ -1,0 +1,104 @@
+#!/usr/bin/env ruby
+#
+
+require 'dbm'
+require 'digest'
+require 'thread'
+require 'yaml'
+require 'optparse'
+
+require 'archivededup/db'
+require 'archivededup/paralleltask'
+require 'archivededup/filepicker'
+
+archive = File.join(ENV['HOME'], 'Archive')
+dbfile = 'archivededup.db'
+threads = 16
+action = 'check'
+
+OptionParser.new do |opts|
+
+  opts.on('-b', '--build', "Build a database.") do 
+    action = 'build'
+  end
+
+  opts.on('-c', '--check', "Check a database and report all duplicates.") do 
+    action = 'check'
+  end
+
+  opts.on('--removedups', "Check a database and remove all duplicates --check reports.") do 
+    action = 'remove'
+  end
+
+  opts.on('-d', '--dir=directory', 'Directory to dedup.') do |o|
+    archive = o
+  end
+
+  opts.on('-D', '--db=database_file', 'Dup database file.') do |o|
+    dbfile = o
+  end
+
+  opts.on('-t', '--threads=count', Integer, 'How many threads to use.') do |o|
+    threads = o
+  end
+end.parse! 
+
+
+db = Archivededup::Db.new(dbfile)
+
+case action
+when 'build'
+
+  parallelTask = Archivededup::ParallelTask.new
+
+  parallelTask.start(threads) do |d|
+    db.add_file(d)
+  end
+
+  parallelTask.scatter do |queue|
+    # Fill the queue and feed the threads.
+    db.add_directory(archive) do |d|
+      queue.enq d
+    end
+  end
+
+when /check|remove/
+  # Check and remove are nearly the same except for the actual delete operation.
+
+  do_delete = action == 'remove'
+
+  filepicker = Archivededup::FilePicker.new
+  
+  db.each_dup do |k, r|
+
+    # Skip files in the Documents directory. It's special.
+    files = r['files'].filter { |f| f !~ /\/(?:Documents|Archive\/Prairie Music)\// }
+
+    # If the filter removed all files, well, do nothing!
+    next if files.length < 2
+
+    # Skip files with unexpected file extensions.
+    unless files.find { |f| f =~ /\.(?:png|jpeg|jpg|mp4|mov|mp3|mod|xfc|gif|m4v|3g2|mpg)$/i }
+      files.each { |f| puts "Not deduping #{f}."}
+      next
+    end
+
+    filekeep = filepicker.pick(files)
+
+    puts "Keep #{filekeep}."
+    files.
+      select { |f| f != filekeep }.
+      each do |f|
+        puts "   Remove #{f}."
+
+        if do_delete
+          # Bit of an excessive check commented out below.
+          # raise Exception.new("Files differ!!!! #{f} #{filekeep}") if File.read(f) != File.read(filekeep)
+          raise Exception.new("File #{f} is the same as keep file #{filekeep}. Will not delete.") if File.identical?(filekeep, f)
+          File.unlink(f)
+        end
+      end
+  end
+end
+
+db.close
