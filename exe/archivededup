@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 #
 
 require 'dbm'
@@ -71,17 +72,16 @@ when /check|remove/
   
   db.each_dup do |k, r|
 
-    # Skip files in the Documents directory. It's special.
-    files = r['files'].filter { |f| f !~ /\/(?:Documents|Archive\/Prairie Music)\// }
+    files = r['files']
 
     # If the filter removed all files, well, do nothing!
     next if files.length < 2
 
     # Skip files with unexpected file extensions.
-    unless files.find { |f| f =~ /\.(?:png|jpeg|jpg|mp4|mov|mp3|mod|xfc|gif|m4v|3g2|mpg)$/i }
-      files.each { |f| puts "Not deduping #{f}."}
-      next
-    end
+    # unless files.find { |f| f =~ /\.(?:png|jpeg|jpg|mp4|mov|mp3|mod|xfc|gif|m4v|3g2|mpg)$/i }
+    #   files.each { |f| puts "Not deduping #{f}. Not a supported file extension."}
+    #   next
+    # end
 
     filekeep = filepicker.pick(files)
 
